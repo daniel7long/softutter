@@ -8,3 +8,5 @@ backend/data/
 .DS_Store
 'n*.zip'n_update/
 n*.zip
+
+*.zip
