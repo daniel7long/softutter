@@ -128,3 +128,31 @@ assert normalize_converse({"reply": {"text": "Au revoir"}, "next": {"answer": "x
 try: normalize_converse({"reply": {"text": " "}}, req); raise SystemExit("should fail")
 except ValueError: pass
 print("ok conversation repair")
+
+# 10. MCP tool logic (plain functions; the MCP wiring is tested separately against the real SDK)
+from app import mcp_tools as mt
+assert [l["code"] for l in mt.list_languages()] == ["fr", "es", "de", "ja", "ko", "zh"]
+saved = mt.save_phrase("es", "ZZ mcp test frase", "a test phrase")
+assert saved["status"] == "new" and saved["can_practice"] and not saved["already_saved"], saved
+assert mt.save_phrase("es", "ZZ mcp test frase")["already_saved"] is True
+assert [p["id"] for p in mt.list_phrases("es", "new", 200)].count(saved["id"]) == 1
+assert mt.set_phrase_status(saved["id"], "echo")["status"] == "echo"
+ps = mt.progress_summary("es")
+assert ps["phrases"]["echo"] >= 1 and ps["phrases_to_practice"][0]["id"] == saved["id"], ps
+for bad in (lambda: mt.save_phrase("xx", "hi"), lambda: mt.save_phrase("es", "  "), lambda: mt.save_phrase("es", "x" * 301),
+            lambda: mt.list_phrases(status="bogus"), lambda: mt.set_phrase_status(saved["id"], "bogus"),
+            lambda: mt.set_phrase_status(999999, "own"), lambda: mt.get_sounds(status="bogus"),
+            lambda: mt.scaffold_sentence("fr", "hi", l1="xx"), lambda: mt.scaffold_sentence("fr", "hi", context="moon")):
+    try: bad(); raise SystemExit("should have raised")
+    except ValueError: pass
+sc = mt.scaffold_sentence("fr", "coffee please")
+assert sc["demo"] is True and len(sc["chunks"]) == 3 and sc["sounds"] and sc["frame"], sc
+T = "ZZ mcp sound"
+store.add_sound_events("es", [{"title": T, "outcome": "care", "tip": "t"}])
+snd = [x for x in mt.get_sounds("es", "working") if x["title"] == T]
+assert snd and snd[0]["history"] == ["care"] and snd[0]["status"] == "working", snd
+assert any(x["title"] == T for x in mt.progress_summary("es")["revisit_sounds"]) or len(mt.progress_summary("es")["revisit_sounds"]) == 3
+store.delete_phrase(saved["id"])
+with store.db() as c:
+    c.execute("DELETE FROM sound_events WHERE key='zz mcp sound'")
+print("ok mcp tools")

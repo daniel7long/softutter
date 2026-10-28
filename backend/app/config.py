@@ -24,6 +24,8 @@ class Settings:
             ).split(",")
             if o.strip()
         ]
+        # Set a long random MCP_TOKEN to expose the MCP server at /mcp (off when empty).
+        self.mcp_token = os.getenv("MCP_TOKEN", "").strip()
         self.data_dir = BASE_DIR / "data"
         self.cache_dir = self.data_dir / "tts_cache"
         self.data_dir.mkdir(exist_ok=True)

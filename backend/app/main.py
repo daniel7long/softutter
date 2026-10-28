@@ -23,10 +23,30 @@ from .schemas import (
 MAX_AUDIO_BYTES = 8 * 1024 * 1024  # ~4 minutes of 16 kHz mono WAV
 
 
+# Optional MCP endpoint at /mcp, only when MCP_TOKEN is set (a long random value).
+mcp_server = None
+mcp_http = None
+if settings.mcp_token:
+    if len(settings.mcp_token) < 16:
+        print("MCP_TOKEN is shorter than 16 characters: the /mcp endpoint is disabled.")
+    else:
+        try:
+            from . import mcp_server
+
+            mcp_http = mcp_server.http_app(settings.mcp_token)
+        except ImportError as exc:  # the `mcp` package is missing: the rest of the API still works
+            print(f"MCP endpoint disabled ({exc}). Run: pip install -r requirements.txt")
+            mcp_server = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     store.init()
-    yield
+    if mcp_http is not None:
+        async with mcp_server.mcp.session_manager.run():
+            yield
+    else:
+        yield
 
 
 app = FastAPI(title="SoftUtter API", version="2.2.0", lifespan=lifespan)
@@ -152,3 +172,8 @@ def sound_events(body: SoundEventsIn):
 @app.get("/api/sounds")
 def sounds(language: str | None = None):
     return store.list_sounds(language)
+
+
+# Keep this last: it catches every path the API routes above did not match.
+if mcp_http is not None:
+    app.mount("/", mcp_http)

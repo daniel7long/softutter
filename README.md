@@ -1,65 +1,84 @@
-# SoftUtter — LLM-driven Speech Scaffolding
+# SoftUtter 2.0
 
-> Friendly speech scaffolding for language learners.
+Friendly speech scaffolding for six languages: **French, Spanish, German, Japanese, Korean, Mandarin Chinese**.
+Say it however you can (speak, type, or mix in your own language) and SoftUtter gives you a natural version,
+annotated sounds, chunked practice and soft, score-free feedback.
 
-[![Live demo](https://img.shields.io/badge/Live%20demo-softutter.vercel.app-2ea44f?style=for-the-badge)](https://softutter.vercel.app)
+## Stack
 
-Learners often know **what** they want to say but not **how** to say it in a new language. SoftUtter takes a rough attempt, spoken or typed, and uses a large language model to **scaffold** it into a target sentence with audio, so learners can hear it, repeat it and make it their own.
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Frontend | React 19 + Vite (JavaScript) | Custom UI from the redesign (waveforms, annotated text, stepper) is awkward in Streamlit |
+| Backend | FastAPI (Python) | Same family as Langogo; clean async uploads; easy to add auth and pronunciation scoring |
+| LLM | OpenAI chat (JSON mode), model via `OPENAI_LLM_MODEL` | One call returns target, chunks, annotations, hints, frame and variants for all 3 help levels |
+| Speech to text | OpenAI transcription, with token log-probs | Flags uncertain words so the learner can fix them |
+| Text to speech | OpenAI TTS, cached on disk | Multilingual, supports 0.6x speed; browser voices are the fallback |
+| Pronunciation | Optional Azure Speech word-level scores | Reuse your Langogo Azure setup; falls back to transcript diff |
+| Storage | SQLite (`backend/data/softutter.db`) | Zero-setup phrasebook for one local user |
 
-The first version was a focused prototype for French learners. **SoftUtter 2.0** is a redesigned, much richer web app that supports six languages.
+Recording is encoded in the browser as 16 kHz mono WAV, so there is **no ffmpeg dependency**.
 
-<!-- Add 3–4 screenshots here, e.g.:
-<p align="center"><img src="docs/screenshots/compose.png" width="22%"> <img src="docs/screenshots/result.png" width="22%"> <img src="docs/screenshots/shadow.png" width="22%"></p>
--->
+## Run it (Windows PowerShell)
 
-| | |
-| --- | --- |
-| **Live demo** | <https://softutter.vercel.app> |
-| **Type** | AI-powered language-learning web app |
-| **Languages** | French, Spanish, German, Japanese, Korean, Mandarin Chinese |
+Terminal 1, backend:
 
----
+```powershell
+cd softutter\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1      # if blocked: Set-ExecutionPolicy -Scope Process Bypass
+pip install -r requirements.txt
+copy .env.example .env             # optional: put your OPENAI_API_KEY in .env
+uvicorn app.main:app --reload --port 8000
+```
+
+Terminal 2, frontend:
+
+```powershell
+cd softutter\frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 in Chrome.
+
+**No API key?** The backend runs in **demo mode**: sample café-order content in all six languages, your browser's own
+voices for audio, and sample feedback. The whole flow is explorable offline.
+
+Optional Azure scoring: `pip install -r requirements-azure.txt`, then set `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION`.
+
+Offline logic checks: `python tests/test_logic.py` (from `backend/`).
 
 ## How it works
 
-1. **Compose:** record your voice (with a timer) or type what you want to say.
-2. **Scaffold:** the model turns your input into a target utterance.
-3. **Listen and shadow:** play the target audio and speak along with it.
-4. **Keep it:** save useful phrases to your phrasebook.
+1. **Compose** → `POST /api/scaffold` (text from typing, mixing, or `POST /api/transcribe`).
+2. **Result** → help level 1 Nudge (hints), 2 Frame (fill the blanks), 3 Full recast. All three are generated in one call, so switching levels is instant.
+3. **Shadow** → back-chaining over chunks (last chunk first), then the whole sentence. Each attempt goes to `POST /api/assess`: transcribe, diff against the target, optional Azure word scores, then short encouraging feedback. No scores are shown.
+4. **Phrasebook** → `GET/POST/PATCH/DELETE /api/phrases`.
+5. **Conversation** → `POST /api/converse` plays a short role-play (5 learner turns; café, meeting someone, friends, work). The partner speaks; you answer by voice or typing (any mix of languages). Each answer is *recast* into a natural sentence without scolding, the partner replies in character, and a hint ladder (Nudge, Frame, Full answer) is always one tap away. Finished conversations list your natural sentences, each with a Practice button into Shadow. Demo mode has one scripted café scene per language.
+6. **My sounds** → Shadow logs, per sound, whether it was *seen*, *clear* or *to revisit* (`POST /api/sounds/events`; `GET /api/sounds`). Each sound is linked to the chunks it occurs in, so a chunk result is credited to the right sounds. Status comes from the last three outcomes: a recent "to revisit" → *Worth another go*; two or more tries with the last three clear → *Getting steady*. No scores. Compose shows the top few as "Sounds to watch".
 
-## Key features (SoftUtter 2.0)
+Sound annotations use five tags rendered in the UI: `care`, `silent`, `link`, `tone` (and `none`).
+Language data (focus areas, codes, placeholders) lives in `backend/app/languages.py`; adding a language is one entry there plus a demo entry in `mock_data.py`.
 
-- **Choose your language:** pick which of six languages you want to be scaffolded in.
-- **Compose:** voice or text input.
-- **Result:** the scaffolded sentence with playable audio.
-- **Shadow:** repeat after the target audio.
-- **Conversation mode.**
-- **Phrasebook:** a personal library of saved phrases.
-- **"My sounds" tracker** for the sounds you are working on.
+## MCP server
 
-## Design and UX highlights
+SoftUtter is also an [MCP](https://modelcontextprotocol.io) server, so an AI client can look at your phrasebook and
+My sounds tracker, save phrases and scaffold sentences. Tools: `list_languages`, `list_phrases`, `get_sounds`,
+`progress_summary`, `save_phrase`, `set_phrase_status`, `scaffold_sentence`; prompt: `warm_up`.
 
-- **A soft, friendly brand:** a blue-to-teal speech bubble with lips and sound waves, "Soft" in blue and "Utter" in teal.
-- **Redesign before rebuild.** Version 2.0 started on the design canvas: compose, result, shadow, conversation and phrasebook screens were designed and approved first, then built.
-- **A deliberately small interaction loop:** say it, scaffold it, hear it, repeat it.
+- **Local (stdio)**, for Claude Desktop, MCP Inspector or any client on the same computer: `python run_mcp.py`
+  (from `backend/`). It uses the same database as the app.
+- **Remote (HTTP)** at `https://<your-backend>/mcp`: set a long random `MCP_TOKEN` (32+ characters) on the backend.
+  Clients send `Authorization: Bearer <token>`. With no `MCP_TOKEN` the endpoint is off.
+- **Only an OpenAI key?** `python examples/ask_softutter.py "What should I practice today?"` asks OpenAI's Responses API
+  to use the deployed MCP server.
 
-## Tech stack
+## Known limits
 
-| Layer | Technology |
-| --- | --- |
-| Intelligence | **Large language model** for scaffolding |
-| Front end | Responsive web app |
-| Hosting | **Vercel** |
-| Design | **Figma** |
+- IPA, tips and demo content are model/sample output: have a native speaker or linguist spot-check each language.
+- Word-level feedback is only as good as speech recognition (plus Azure if enabled). Phoneme-level feedback is a later step.
+- No accounts yet: one local user. Add auth before any public launch.
 
-<!-- TODO(stack): add the framework, LLM provider and model, speech-to-text and text-to-speech services, and back-end (check package.json / requirements.txt). -->
+## Roadmap
 
-## Engineering highlights
-
-- **Six languages, including non-Latin scripts** (Japanese, Korean and Mandarin Chinese) alongside French, Spanish and German.
-- **From prototype to product.** The project grew from a minimal Streamlit-style tool into a multi-screen web application.
-- **Audio in the loop.** Recording, generated target audio and shadowing all sit in one interaction.
-
----
-
-**Designed and built by [Daniel Long](https://daniel7long.com)** · M.S. Human-Computer Interaction, Carnegie Mellon University
+Warm-up queue from the phrasebook, accounts.
