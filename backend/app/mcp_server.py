@@ -11,6 +11,7 @@ import hmac
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
 
@@ -87,5 +88,13 @@ class BearerAuth:
 
 def http_app(token: str):
     """The MCP endpoint (POST /mcp) as an ASGI app. Stateless JSON responses suit a free, restarting host."""
-    app = mcp.streamable_http_app(streamable_http_path="/mcp", json_response=True, stateless_http=True)
+    # The SDK only accepts a "localhost" Host header by default (answers 421 otherwise). This endpoint is
+    # public and guarded by the bearer token, so the DNS-rebinding check (meant for token-less local
+    # servers) is switched off; otherwise the Render hostname would be refused.
+    app = mcp.streamable_http_app(
+        streamable_http_path="/mcp",
+        json_response=True,
+        stateless_http=True,
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
     return BearerAuth(app, token)
